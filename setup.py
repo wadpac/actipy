@@ -1,7 +1,9 @@
 import setuptools
 import codecs
 import os.path
-
+from pybind11 import get_cmake_dir
+# Available at setup time due to pyproject.toml
+from pybind11.setup_helpers import Pybind11Extension, build_ext
 
 def read(rel_path):
     here = os.path.abspath(os.path.dirname(__file__))
@@ -18,6 +20,14 @@ def get_string(string, rel_path="actipy/__init__.py"):
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
+
+ext_modules = [
+    Pybind11Extension("GENEActivReaderCPP",
+        ["actipy/GENEActivReader.cxx"],
+        # # Example: passing in the version to the compiled code
+        # define_macros = [('VERSION_INFO', __version__)],
+        ),
+]
 
 setuptools.setup(
     name="actipy",
@@ -43,5 +53,10 @@ setuptools.setup(
         "pandas>=1.2.5",
         "statsmodels>=0.12.2",
         "Jpype1==1.3.0",
+        "pybind11>=2.9.2"
     ],
+    ext_modules=ext_modules,
+    # Currently, build_ext only provides an optional "highest supported C++
+    # level" feature, but in the future it may provide more features.
+    cmdclass={"build_ext": build_ext},
 )
