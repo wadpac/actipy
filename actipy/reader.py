@@ -22,7 +22,8 @@ def read_device(input_file,
                 calibrate_gravity=True,
                 detect_nonwear=True,
                 resample_hz='uniform',
-                verbose=True):
+                verbose=True,
+                cpp_reader=False):
     """ 
     Read and process accelerometer device file. Returns a pandas.DataFrame with
     the processed data and a dict with processing info. 
@@ -42,11 +43,13 @@ def read_device(input_file,
     :type resample_hz: str or int, optional
     :param verbose: Verbosity, defaults to True.
     :type verbose: bool, optional
+    :param cpp_reader: Use C++ reader instead of Java reader, defaults to False.
+    :type cpp_reader: bool, optional
     :return: Processed data and processing info.
     :rtype: (pandas.DataFrame, dict)
     """
 
-    data, info_read = _read_device(input_file, verbose)
+    data, info_read = _read_device(input_file, verbose, cpp_reader=cpp_reader)
 
     data, info_process = process(data, info_read['SampleRate'],
                                  lowpass_hz=lowpass_hz,
@@ -136,7 +139,7 @@ def process(data, sample_rate,
     return data, info
 
 
-def _read_device(input_file, verbose=True):
+def _read_device(input_file, verbose=True, cpp_reader=False):
     """ Internal function that interfaces with the Java parser to read the
     device file. Returns parsed data as a pandas dataframe, and a dict with
     general info.
@@ -150,6 +153,7 @@ def _read_device(input_file, verbose=True):
         tmpdir = tempfile.mkdtemp()
         # Temporary file to store parsed device data
         tmpout = os.path.join(tmpdir, "tmpout.npy")
+        print(f"tmpout file: {tmpout}")
 
         info = {}
         info['Filename'] = input_file
@@ -165,7 +169,10 @@ def _read_device(input_file, verbose=True):
 
         # Parsing. Main action happens here.
         timer.start("Reading file...")
-        info_read = java_read_device(input_file, tmpout, verbose)
+        if cpp_reader:
+            info_read = cpp_read_device(input_file, tmpout, verbose)
+        else:
+            info_read = java_read_device(input_file, tmpout, verbose)
         timer.stop()
 
         timer.start("Converting to dataframe...")
@@ -188,6 +195,23 @@ def _read_device(input_file, verbose=True):
             shutil.rmtree(tmpdir)
         except OSError as e:
             print("Error: %s - %s." % (e.filename, e.strerror))
+
+
+def cpp_read_device(input_file, output_file, verbose):
+    """Replicates the original Java functionality for GENEActiv files."""
+    if input_file.lower().endswith('.bin'):
+        info = cpp_read(input_file, output_file)
+
+        # # Convert the Java HashMap object to Python dictionary
+        # info = {str(k): str(info[k]) for k in info}
+        # info['ReadOK'] = int(info['ReadOK'])
+        # info['ReadErrors'] = int(info['ReadErrors'])
+        # info['SampleRate'] = float(info['SampleRate'])
+    else:
+        print("Warning: C++ reader can only be used on GENEActiv files. Now dispatching to Java reader.")
+        info = java_read_device(input_file, output_file, verbose)
+
+    return info
 
 
 def java_read_device(input_file, output_file, verbose):
