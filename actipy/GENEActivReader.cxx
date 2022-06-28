@@ -89,6 +89,7 @@ int parseBinFileHeader(std::istream& input_file, int fileHeaderSize, int linesTo
 
     input_file.ignore(max_streamsize, ':');
     input_file >> numBlocksTotal; // 11
+    input_file.ignore(max_streamsize, '\n');
 
     // ignore remaining header lines in bin file
     for (int i = 0; i < fileHeaderSize - linesToAxesCalibration - 11; i++) {
@@ -143,10 +144,7 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<double>, py::array_t<double>
         std::string timeFmtStr = "Page Time:%Y-%m-%d %H:%M:%S:";
 
         std::string line;
-        printf("hoi\n");
         while (std::getline(input_file, line)) {
-            printf("hoi2\n");
-
             // header: "Recorded Data" (0), serialCode (1), seq num (2),
             // blockTime (3), unassigned (4), temp (5), batteryVolt (6),
             // deviceStatus (7), freq (8), data (9)
@@ -176,9 +174,10 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<double>, py::array_t<double>
                         ss.ignore(max_streamsize, ':');
                         ss >> freq;
                     }
-                } catch (std::exception &e) {
+                } catch (const std::exception &e) {
                     errCounter++;
-                    std::cerr << e.what() << std::endl;
+                    std::cerr << "header error: ";
+                    std::cerr << e.what() << '\n';
                     continue;
                 }
             }
@@ -198,16 +197,14 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<double>, py::array_t<double>
             double t = 0.0;
 
             int i = 0;
-            std::stringstream data_ss(data);
-            for (char a[12]; data_ss.getline(a, 12); ) {
+            while (hexPosition < data.size() - 1) {
                 try {
-                    std::string hex_string(a);
                     std::stringstream ss;
-                    ss << std::hex << hex_string.substr(0, 3);
+                    ss << std::hex << data.substr(hexPosition, hexPosition + 3);
                     ss >> xRaw;
-                    ss << std::hex << hex_string.substr(3, 6);
+                    ss << std::hex << data.substr(hexPosition + 3, hexPosition + 6);
                     ss >> yRaw;
-                    ss << std::hex << hex_string.substr(6, 9);
+                    ss << std::hex << data.substr(hexPosition + 6, hexPosition + 9);
                     ss >> zRaw;
                     // todo *** read in light[36:46] (10 bits to signed int) and
                     // button[47] (bool) values...
@@ -225,10 +222,12 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<double>, py::array_t<double>
                     z_array.push_back(z);
                     T_array.push_back(temperature);
 
+                    hexPosition += 12;
                     i++;
-                } catch (std::exception &e) {
+                } catch (const std::exception &e) {
                     errCounter++;
-                    std::cerr << e.what() << std::endl;
+                    std::cerr << "data error at i = " << i << ": ";
+                    std::cerr << e.what() << '\n';
                     break;  // rest of this block could be corrupted
                 }
             }
