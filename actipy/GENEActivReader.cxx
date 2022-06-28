@@ -2,11 +2,14 @@
 #include <string>
 #include <limits>
 #include <fstream>
+#include <vector>
+#include <iomanip>  // get_time
 
 #include <iostream>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
+#include <pybind11/stl.h>
 
 namespace py = pybind11;
 
@@ -95,7 +98,7 @@ int parseBinFileHeader(std::istream& input_file, int fileHeaderSize, int linesTo
 }
 
 
-std::tuple<py::dict, py::array_t<long>, py::array_t<double>, py::array_t<double>, py::array_t<double>, py::array_t<double>> read(std::string accFile, bool verbose) {
+std::tuple<py::dict, py::array_t<long>, py::array_t<double>, py::array_t<double>, py::array_t<double>, py::array_t<double>> readFile(std::string accFile, bool verbose) {
 
     py::dict info;
 
@@ -107,8 +110,12 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<double>, py::array_t<double>
     int errCounter = 0;
 
     // NpyWriter writer = new NpyWriter(outFile, ITEM_NAMES_AND_TYPES);
-    py::array_t<long> time;
-    py::array_t<double> x, y, z, T;
+    // py::array_t<long> time_array;
+    // py::array_t<double> x_array, y_array, z_array, T_array;
+    std::vector<long> time_array;
+    std::vector<double> x_array, y_array, z_array, T_array;
+
+    auto max_streamsize = std::numeric_limits<std::streamsize>::max();
 
     try {
         std::ifstream input_file(accFile);
@@ -126,54 +133,59 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<double>, py::array_t<double>
         std::cout << "mfrOffset[1]: " << mfrOffset[1] << std::endl;
         std::cout << "mfrGain[2]: " << mfrGain[2] << std::endl;
         std::cout << "mfrOffset[2]: " << mfrOffset[2] << std::endl;
-        exit(0);
-/*
+
         int blockCount = 0;
-        String header;
+        std::string header;
         long blockTime = 0;  // Unix millis
         double temperature = 0.0;
         double freq = 0.0;
-        String data;
-        String timeFmtStr = "yyyy-MM-dd HH:mm:ss:SSS";
-        DateTimeFormatter timeFmt = DateTimeFormatter.ofPattern(timeFmtStr);
+        std::string data;
+        std::string timeFmtStr = "Page Time:%Y-%m-%d %H:%M:%S:";
 
         std::string line;
-        while (std::getline(infile, line))
-        {
-            std::istringstream iss(line);
-            int a, b;
-            if (!(iss >> a >> b)) { break; } // error
+        printf("hoi\n");
+        while (std::getline(input_file, line)) {
+            printf("hoi2\n");
 
-            // process pair (a,b)
-        }
-
-        while ((readLine(rawAccReader)) != null) {
             // header: "Recorded Data" (0), serialCode (1), seq num (2),
             // blockTime (3), unassigned (4), temp (5), batteryVolt (6),
             // deviceStatus (7), freq (8), data (9)
             for (int i = 1; i < blockHeaderSize; i++) {
                 try {
-                    header = readLine(rawAccReader);
+                    std::getline(input_file, header);
                     if (i == 3) {
-                        blockTime = LocalDateTime
-                                    .parse(header.split("Time:")[1], timeFmt)
-                                    .toInstant(ZoneOffset.UTC)
-                                    .toEpochMilli();
+                        std::tm tm = {};
+                        std::stringstream ss(header);
+                        ss >> std::get_time(&tm, timeFmtStr.c_str());
+                        int milliseconds;
+                        ss >> milliseconds;
+                        auto tp = std::chrono::system_clock::from_time_t(std::mktime(&tm));
+                        
+                        // Note: not doing anything with time zone here, not sure if necessary, but
+                        // Java version specifies UTC. I'm not sure whether that does anything, because
+                        // I'd say it assumes that the data is in UTC, so if that assumption breaks,
+                        // any specified timezone here won't fix that, since no timezone information
+                        // is read from the file anywhere anyway.
+                        blockTime = std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count() + milliseconds;
                     } else if (i == 5) {
-                        temperature = Double.parseDouble(header.split(":")[1]);
+                        std::stringstream ss(header);
+                        ss.ignore(max_streamsize, ':');
+                        ss >> temperature;
                     } else if (i == 8) {
-                        freq = Double.parseDouble(header.split(":")[1]);
+                        std::stringstream ss(header);
+                        ss.ignore(max_streamsize, ':');
+                        ss >> freq;
                     }
-                } catch (Exception e) {
+                } catch (std::exception &e) {
                     errCounter++;
-                    e.printStackTrace();
+                    std::cerr << e.what() << std::endl;
                     continue;
                 }
             }
             sampleRate = freq;
 
             // now process hex data
-            data = readLine(rawAccReader);
+            std::getline(input_file, data);
 
             // raw reading values
             int hexPosition = 0;
@@ -186,63 +198,69 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<double>, py::array_t<double>
             double t = 0.0;
 
             int i = 0;
-            while (hexPosition < data.length()) {
-
+            std::stringstream data_ss(data);
+            for (char a[12]; data_ss.getline(a, 12); ) {
                 try {
-
-                    xRaw = getSignedIntFromHex(data, hexPosition, 3);
-                    yRaw = getSignedIntFromHex(data, hexPosition + 3, 3);
-                    zRaw = getSignedIntFromHex(data, hexPosition + 6, 3);
+                    std::string hex_string(a);
+                    std::stringstream ss;
+                    ss << std::hex << hex_string.substr(0, 3);
+                    ss >> xRaw;
+                    ss << std::hex << hex_string.substr(3, 6);
+                    ss >> yRaw;
+                    ss << std::hex << hex_string.substr(6, 9);
+                    ss >> zRaw;
                     // todo *** read in light[36:46] (10 bits to signed int) and
                     // button[47] (bool) values...
 
                     // Update values to calibrated measure (taken from GENEActiv manual)
-                    x = (xRaw * 100.0d - mfrOffset[0]) / mfrGain[0];
-                    y = (yRaw * 100.0d - mfrOffset[1]) / mfrGain[1];
-                    z = (zRaw * 100.0d - mfrOffset[2]) / mfrGain[2];
+                    x = (xRaw * 100. - mfrOffset[0]) / mfrGain[0];
+                    y = (yRaw * 100. - mfrOffset[1]) / mfrGain[1];
+                    z = (zRaw * 100. - mfrOffset[2]) / mfrGain[2];
 
                     t = (double)blockTime + (double)i * (1.0 / freq) * 1000;  // Unix millis
 
-                    writer.write(toItems((long) t, x, y, z, temperature));
+                    time_array.push_back(t);
+                    x_array.push_back(x);
+                    y_array.push_back(y);
+                    z_array.push_back(z);
+                    T_array.push_back(temperature);
 
-                    hexPosition += 12;
                     i++;
-
-                } catch (Exception e) {
+                } catch (std::exception &e) {
                     errCounter++;
-                    e.printStackTrace();
+                    std::cerr << e.what() << std::endl;
                     break;  // rest of this block could be corrupted
                 }
-
             }
 
             // Progress bar
             blockCount++;
             if (verbose) {
                 if ((blockCount % 10000 == 0) || (blockCount == numBlocksTotal)) {
-                    System.out.print("Reading file... " + (blockCount * 100 / numBlocksTotal) + "%\r");
-                    // if (blockCount == numBlocksTotal) {System.out.print("\n");}
+                    printf("Reading file... %d%%\r", (blockCount * 100 / numBlocksTotal));
                 }
             }
 
         }
-        rawAccReader.close();
-*/
         statusOK = 1;
-
     } catch (const std::exception &e) {
         std::cerr << "an error occurred while reading!\n" << e.what();
         statusOK = 0;
     }
-/*
-    info.put("ReadOK", String.valueOf(statusOK));
-    info.put("ReadErrors", String.valueOf(errCounter));
-    info.put("SampleRate", String.valueOf(sampleRate));
-*/
-    return {std::move(info), std::move(time), std::move(x), std::move(y), std::move(z), std::move(T)};
+
+    info["ReadOK"] = std::to_string(statusOK);
+    info["ReadErrors"] = std::to_string(errCounter);
+    info["SampleRate"] = std::to_string(sampleRate);
+
+    // return {std::move(info), std::move(time_array), std::move(x_array),
+    //         std::move(y_array), std::move(z_array), std::move(T_array)};
+    return {info, py::cast(time_array), py::cast(x_array),
+            py::cast(y_array), py::cast(z_array), py::cast(T_array)};
 }
 
 PYBIND11_MODULE(GENEActivReaderCPP, m) {
     m.def("add_arrays", &add_arrays, "Add two NumPy arrays");
-    m.def("read", &read, "Read a GENEActive file");
+    // N.B.: don't use 'read' as the C++ function name, it is already used by
+    // some include and will not compile (so we use readFile):
+    m.def("read", &readFile, "Read a GENEActive file");
 }
