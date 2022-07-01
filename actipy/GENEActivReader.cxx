@@ -113,7 +113,7 @@ int getSignedIntFromHex(const std::string &hex) {
 }
 
 
-std::tuple<py::dict, py::array_t<long>, py::array_t<double>, py::array_t<double>, py::array_t<double>, py::array_t<double>> readFile(std::string accFile, bool verbose) {
+std::tuple<py::dict, py::array_t<long>, py::array_t<float>, py::array_t<float>, py::array_t<float>, py::array_t<float>> readFile(std::string accFile, bool verbose) {
 
     py::dict info;
 
@@ -128,7 +128,7 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<double>, py::array_t<double>
     // py::array_t<long> time_array;
     // py::array_t<double> x_array, y_array, z_array, T_array;
     std::vector<long> time_array;
-    std::vector<double> x_array, y_array, z_array, T_array;
+    std::vector<float> x_array, y_array, z_array, T_array;
 
     auto max_streamsize = std::numeric_limits<std::streamsize>::max();
 
