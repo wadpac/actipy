@@ -12,6 +12,7 @@ import pandas as pd
 import jpype
 
 from actipy import processing
+import GENEActivReaderCPP
 
 
 __all__ = ['read_device', 'process']
@@ -170,16 +171,21 @@ def _read_device(input_file, verbose=True, cpp_reader=False):
         # Parsing. Main action happens here.
         timer.start("Reading file...")
         if cpp_reader:
-            info_read = cpp_read_device(input_file, tmpout, verbose)
+            info_read, npy_data = cpp_read_device(input_file, verbose)
         else:
             info_read = java_read_device(input_file, tmpout, verbose)
         timer.stop()
 
         timer.start("Converting to dataframe...")
-        # Load parsed data to a pandas dataframe
-        data = npy2df(np.load(tmpout, mmap_mode='r'))
+        if cpp_reader:
+            data = npy2df(npy_data)
+        else:
+            # Load parsed data to a pandas dataframe
+            data = npy2df(np.load(tmpout, mmap_mode='r'))
         # Fix if time non-increasing (rarely occurs)
         data, nonincr_time_errs = fix_nonincr_time(data)
+        print(nonincr_time_errs, type(info_read['SampleRate']))
+        print()
         # Update read errors. Non-increasing time errors scaled by sample rate
         info_read['ReadErrors'] += int(np.ceil(nonincr_time_errs / info_read['SampleRate']))
         timer.stop()
@@ -197,21 +203,14 @@ def _read_device(input_file, verbose=True, cpp_reader=False):
             print("Error: %s - %s." % (e.filename, e.strerror))
 
 
-def cpp_read_device(input_file, output_file, verbose):
+def cpp_read_device(input_file, verbose):
     """Replicates the original Java functionality for GENEActiv files."""
     if input_file.lower().endswith('.bin'):
-        info = cpp_read(input_file, output_file)
-
-        # # Convert the Java HashMap object to Python dictionary
-        # info = {str(k): str(info[k]) for k in info}
-        # info['ReadOK'] = int(info['ReadOK'])
-        # info['ReadErrors'] = int(info['ReadErrors'])
-        # info['SampleRate'] = float(info['SampleRate'])
+        info, *data = GENEActivReaderCPP.read(input_file, verbose)
     else:
-        print("Warning: C++ reader can only be used on GENEActiv files. Now dispatching to Java reader.")
-        info = java_read_device(input_file, output_file, verbose)
+        raise Exception("Warning: C++ reader can only be used on GENEActiv files. Now dispatching to Java reader.")
 
-    return info
+    return info, {'time': data[0], 'x': data[1], 'y': data[2], 'z': data[3], 'T': data[4]}
 
 
 def java_read_device(input_file, output_file, verbose):

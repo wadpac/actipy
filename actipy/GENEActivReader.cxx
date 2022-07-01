@@ -258,9 +258,9 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<double>, py::array_t<double>
         statusOK = 0;
     }
 
-    info["ReadOK"] = std::to_string(statusOK);
-    info["ReadErrors"] = std::to_string(errCounter);
-    info["SampleRate"] = std::to_string(sampleRate);
+    info["ReadOK"] = statusOK;
+    info["ReadErrors"] = errCounter;
+    info["SampleRate"] = sampleRate;
 
     // return {std::move(info), std::move(time_array), std::move(x_array),
     //         std::move(y_array), std::move(z_array), std::move(T_array)};
