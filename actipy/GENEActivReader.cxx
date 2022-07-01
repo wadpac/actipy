@@ -99,6 +99,20 @@ int parseBinFileHeader(std::istream& input_file, int fileHeaderSize, int linesTo
 }
 
 
+int getSignedIntFromHex(const std::string &hex) {
+    // input hex base is 16
+    int rawVal = std::stoll(hex, nullptr, 16);
+    int unsignedLimit = 4096; // 2^[length*4] #i.e. 3 hexBytes (12 bits)
+                                // limit = 4096
+    int signedLimit = 2048; // 2^[length*(4-1)] #i.e. 3 hexBytes - 1 bit (11
+                            // bits) limit = 2048
+    if (rawVal > signedLimit) {
+        rawVal = rawVal - unsignedLimit;
+    }
+    return rawVal;
+}
+
+
 std::tuple<py::dict, py::array_t<long>, py::array_t<double>, py::array_t<double>, py::array_t<double>, py::array_t<double>> readFile(std::string accFile, bool verbose) {
 
     py::dict info;
@@ -200,12 +214,9 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<double>, py::array_t<double>
             while (hexPosition < data.size() - 1) {
                 try {
                     std::stringstream ss;
-                    ss << std::hex << data.substr(hexPosition, hexPosition + 3);
-                    ss >> xRaw;
-                    ss << std::hex << data.substr(hexPosition + 3, hexPosition + 6);
-                    ss >> yRaw;
-                    ss << std::hex << data.substr(hexPosition + 6, hexPosition + 9);
-                    ss >> zRaw;
+                    xRaw = getSignedIntFromHex(data.substr(hexPosition, 3));
+                    yRaw = getSignedIntFromHex(data.substr(hexPosition + 3, 3));
+                    zRaw = getSignedIntFromHex(data.substr(hexPosition + 6, 3));
                     // todo *** read in light[36:46] (10 bits to signed int) and
                     // button[47] (bool) values...
 
