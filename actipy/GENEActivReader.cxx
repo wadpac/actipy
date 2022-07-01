@@ -172,13 +172,17 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<double>, py::array_t<double>
                         int milliseconds;
                         ss >> milliseconds;
                         auto tp = std::chrono::system_clock::from_time_t(std::mktime(&tm));
-                        
-                        // Note: not doing anything with time zone here, not sure if necessary, but
-                        // Java version specifies UTC. I'm not sure whether that does anything, because
-                        // I'd say it assumes that the data is in UTC, so if that assumption breaks,
-                        // any specified timezone here won't fix that, since no timezone information
-                        // is read from the file anywhere anyway.
-                        blockTime = std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count() + milliseconds;
+                        // Note: the timezone variable may not be portable to all OS'es!
+                        blockTime = std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count() + milliseconds - timezone * 1000;
+
+                        // The above could be replaced by the following OS-portable C++20 when
+                        // all compilers support it:
+                        // std::chrono::utc_time<std::chrono::seconds> tp;
+                        // std::stringstream ss(header);
+                        // ss >> std::chrono::parse(timeFmtStr, tp);
+                        // int milliseconds;
+                        // ss >> milliseconds;
+                        // blockTime = std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count() + milliseconds;
                     } else if (i == 5) {
                         std::stringstream ss(header);
                         ss.ignore(max_streamsize, ':');

@@ -184,8 +184,6 @@ def _read_device(input_file, verbose=True, cpp_reader=False):
             data = npy2df(np.load(tmpout, mmap_mode='r'))
         # Fix if time non-increasing (rarely occurs)
         data, nonincr_time_errs = fix_nonincr_time(data)
-        print(nonincr_time_errs, type(info_read['SampleRate']))
-        print()
         # Update read errors. Non-increasing time errors scaled by sample rate
         info_read['ReadErrors'] += int(np.ceil(nonincr_time_errs / info_read['SampleRate']))
         timer.stop()
