@@ -5,47 +5,11 @@
 #include <vector>
 #include <iomanip>  // get_time
 
-#include <iostream>
-
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 
 namespace py = pybind11;
-
-// geplakt voorbeeld van https://pybind11.readthedocs.io/en/stable/advanced/pycpp/numpy.html#vectorizing-functions om even uit te proberen
-py::array_t<double> add_arrays(py::array_t<double> input1, py::array_t<double> input2) {
-    py::buffer_info buf1 = input1.request(), buf2 = input2.request();
-
-    if (buf1.ndim != 1 || buf2.ndim != 1)
-        throw std::runtime_error("Number of dimensions must be one");
-
-    if (buf1.size != buf2.size)
-        throw std::runtime_error("Input shapes must match");
-
-    /* No pointer is passed, so NumPy will allocate the buffer */
-    auto result = py::array_t<double>(buf1.size);
-
-    py::buffer_info buf3 = result.request();
-
-    double *ptr1 = static_cast<double *>(buf1.ptr);
-    double *ptr2 = static_cast<double *>(buf2.ptr);
-    double *ptr3 = static_cast<double *>(buf3.ptr);
-
-    for (long idx = 0; idx < buf1.shape[0]; idx++)
-        ptr3[idx] = ptr1[idx] + ptr2[idx];
-
-    return result;
-
-    // // ander voorbeeld, hoe je snel (zonder bounds checks) itereert over dimensies:
-    // auto r = x.unchecked<3>(); // x must have ndim = 3; can be non-writeable
-    // double sum = 0;
-    // for (py::ssize_t i = 0; i < r.shape(0); i++)
-    //     for (py::ssize_t j = 0; j < r.shape(1); j++)
-    //         for (py::ssize_t k = 0; k < r.shape(2); k++)
-    //             sum += r(i, j, k);
-    // return sum;
-}
 
 /**
  * Replicates bin file header, also calculates and returns
@@ -124,9 +88,6 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<float>, py::array_t<float>, 
     double sampleRate = -1;
     int errCounter = 0;
 
-    // NpyWriter writer = new NpyWriter(outFile, ITEM_NAMES_AND_TYPES);
-    // py::array_t<long> time_array;
-    // py::array_t<double> x_array, y_array, z_array, T_array;
     std::vector<long> time_array;
     std::vector<float> x_array, y_array, z_array, T_array;
 
@@ -139,19 +100,9 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<float>, py::array_t<float>, 
         int mfrOffset[3];
         int numBlocksTotalint = parseBinFileHeader(input_file, fileHeaderSize, linesToAxesCalibration, mfrGain, mfrOffset);
         if (numBlocksTotalint < 0) {
-            std::cerr << "WARNING: numBlocksTotal read in from header is negative, file corrupted?";
+            fprintf(stderr, "WARNING: numBlocksTotal read in from header is negative, file corrupted?\n");
         }
         std::size_t numBlocksTotal = numBlocksTotalint;
-
-        std::cout << "WARNING: Remove iostream dependency before publishing!\n";
-
-        std::cout << "numBlocksTotal: " << numBlocksTotal << std::endl;
-        std::cout << "mfrGain[0]: " << mfrGain[0] << std::endl;
-        std::cout << "mfrOffset[0]: " << mfrOffset[0] << std::endl;
-        std::cout << "mfrGain[1]: " << mfrGain[1] << std::endl;
-        std::cout << "mfrOffset[1]: " << mfrOffset[1] << std::endl;
-        std::cout << "mfrGain[2]: " << mfrGain[2] << std::endl;
-        std::cout << "mfrOffset[2]: " << mfrOffset[2] << std::endl;
 
         std::size_t blockCount = 0;
         std::string header;
@@ -207,8 +158,7 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<float>, py::array_t<float>, 
                         }
                     } catch (const std::exception &e) {
                         errCounter++;
-                        std::cerr << "header error: ";
-                        std::cerr << e.what() << '\n';
+                        fprintf(stderr, "header error: %s\n", e.what());
                         continue;
                     }
                 }
@@ -234,8 +184,6 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<float>, py::array_t<float>, 
                         xRaw = getSignedIntFromHex(data.substr(hexPosition, 3));
                         yRaw = getSignedIntFromHex(data.substr(hexPosition + 3, 3));
                         zRaw = getSignedIntFromHex(data.substr(hexPosition + 6, 3));
-                        // todo *** read in light[36:46] (10 bits to signed int) and
-                        // button[47] (bool) values...
 
                         // Update values to calibrated measure (taken from GENEActiv manual)
                         x = (xRaw * 100. - mfrOffset[0]) / mfrGain[0];
@@ -254,8 +202,7 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<float>, py::array_t<float>, 
                         i++;
                     } catch (const std::exception &e) {
                         errCounter++;
-                        std::cerr << "data error at i = " << i << ": ";
-                        std::cerr << e.what() << '\n';
+                        fprintf(stderr, "data error at i = %d: %s\n", i, e.what());
                         break;  // rest of this block could be corrupted
                     }
                 }
@@ -281,7 +228,7 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<float>, py::array_t<float>, 
         statusOK = 1;
         info["numBlocksTotal"] = numBlocksTotal;
     } catch (const std::exception &e) {
-        std::cerr << "an error occurred while reading!\n" << e.what();
+        fprintf(stderr, "an error occurred while reading!\n%s\n", e.what());
         statusOK = 0;
     }
 
@@ -289,14 +236,11 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<float>, py::array_t<float>, 
     info["ReadErrors"] = errCounter;
     info["SampleRate"] = sampleRate;
 
-    // return {std::move(info), std::move(time_array), std::move(x_array),
-    //         std::move(y_array), std::move(z_array), std::move(T_array)};
     return {info, py::cast(time_array), py::cast(x_array),
             py::cast(y_array), py::cast(z_array), py::cast(T_array)};
 }
 
 PYBIND11_MODULE(GENEActivReaderCPP, m) {
-    m.def("add_arrays", &add_arrays, "Add two NumPy arrays");
     // N.B.: don't use 'read' as the C++ function name, it is already used by
     // some include and will not compile (so we use readFile):
     m.def("read", &readFile, "Read a GENEActive file",
