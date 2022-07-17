@@ -113,7 +113,7 @@ int getSignedIntFromHex(const std::string &hex) {
 }
 
 
-std::tuple<py::dict, py::array_t<long>, py::array_t<float>, py::array_t<float>, py::array_t<float>, py::array_t<float>> readFile(std::string accFile, bool verbose) {
+std::tuple<py::dict, py::array_t<long>, py::array_t<float>, py::array_t<float>, py::array_t<float>, py::array_t<float>> readFile(std::string accFile, bool verbose, std::size_t start = 0, std::size_t end = 0) {
 
     py::dict info;
 
@@ -137,7 +137,11 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<float>, py::array_t<float>, 
         // Read header to determine mfrGain and mfrOffset values
         double mfrGain[3];
         int mfrOffset[3];
-        int numBlocksTotal = parseBinFileHeader(input_file, fileHeaderSize, linesToAxesCalibration, mfrGain, mfrOffset);
+        int numBlocksTotalint = parseBinFileHeader(input_file, fileHeaderSize, linesToAxesCalibration, mfrGain, mfrOffset);
+        if (numBlocksTotalint < 0) {
+            std::cerr << "WARNING: numBlocksTotal read in from header is negative, file corrupted?";
+        }
+        std::size_t numBlocksTotal = numBlocksTotalint;
 
         std::cout << "WARNING: Remove iostream dependency before publishing!\n";
 
@@ -149,7 +153,7 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<float>, py::array_t<float>, 
         std::cout << "mfrGain[2]: " << mfrGain[2] << std::endl;
         std::cout << "mfrOffset[2]: " << mfrOffset[2] << std::endl;
 
-        int blockCount = 0;
+        std::size_t blockCount = 0;
         std::string header;
         long blockTime = 0;  // Unix millis
         double temperature = 0.0;
@@ -157,106 +161,125 @@ std::tuple<py::dict, py::array_t<long>, py::array_t<float>, py::array_t<float>, 
         std::string data;
         std::string timeFmtStr = "Page Time:%Y-%m-%d %H:%M:%S:";
 
+        if (start == 0) {
+            start = 1;
+        }
+        if (end == 0) {
+            end = numBlocksTotal;
+        }
+
         std::string line;
         while (std::getline(input_file, line)) {
-            // header: "Recorded Data" (0), serialCode (1), seq num (2),
-            // blockTime (3), unassigned (4), temp (5), batteryVolt (6),
-            // deviceStatus (7), freq (8), data (9)
-            for (int i = 1; i < blockHeaderSize; i++) {
-                try {
-                    std::getline(input_file, header);
-                    if (i == 3) {
-                        std::tm tm = {};
-                        std::stringstream ss(header);
-                        ss >> std::get_time(&tm, timeFmtStr.c_str());
-                        int milliseconds;
-                        ss >> milliseconds;
-                        auto tp = std::chrono::system_clock::from_time_t(std::mktime(&tm));
-                        // Note: the timezone variable may not be portable to all OS'es!
-                        blockTime = std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count() + milliseconds - timezone * 1000;
+            ++blockCount;
+            if (blockCount >= start && blockCount <= end) {
+                // header: "Recorded Data" (0), serialCode (1), seq num (2),
+                // blockTime (3), unassigned (4), temp (5), batteryVolt (6),
+                // deviceStatus (7), freq (8), data (9)
+                for (int i = 1; i < blockHeaderSize; i++) {
+                    try {
+                        std::getline(input_file, header);
+                        if (i == 3) {
+                            std::tm tm = {};
+                            std::stringstream ss(header);
+                            ss >> std::get_time(&tm, timeFmtStr.c_str());
+                            int milliseconds;
+                            ss >> milliseconds;
+                            auto tp = std::chrono::system_clock::from_time_t(std::mktime(&tm));
+                            // Note: the timezone variable may not be portable to all OS'es!
+                            blockTime = std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count() + milliseconds - timezone * 1000;
 
-                        // The above could be replaced by the following OS-portable C++20 when
-                        // all compilers support it:
-                        // std::chrono::utc_time<std::chrono::seconds> tp;
-                        // std::stringstream ss(header);
-                        // ss >> std::chrono::parse(timeFmtStr, tp);
-                        // int milliseconds;
-                        // ss >> milliseconds;
-                        // blockTime = std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count() + milliseconds;
-                    } else if (i == 5) {
-                        std::stringstream ss(header);
-                        ss.ignore(max_streamsize, ':');
-                        ss >> temperature;
-                    } else if (i == 8) {
-                        std::stringstream ss(header);
-                        ss.ignore(max_streamsize, ':');
-                        ss >> freq;
+                            // The above could be replaced by the following OS-portable C++20 when
+                            // all compilers support it:
+                            // std::chrono::utc_time<std::chrono::seconds> tp;
+                            // std::stringstream ss(header);
+                            // ss >> std::chrono::parse(timeFmtStr, tp);
+                            // int milliseconds;
+                            // ss >> milliseconds;
+                            // blockTime = std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count() + milliseconds;
+                        } else if (i == 5) {
+                            std::stringstream ss(header);
+                            ss.ignore(max_streamsize, ':');
+                            ss >> temperature;
+                        } else if (i == 8) {
+                            std::stringstream ss(header);
+                            ss.ignore(max_streamsize, ':');
+                            ss >> freq;
+                        }
+                    } catch (const std::exception &e) {
+                        errCounter++;
+                        std::cerr << "header error: ";
+                        std::cerr << e.what() << '\n';
+                        continue;
                     }
-                } catch (const std::exception &e) {
-                    errCounter++;
-                    std::cerr << "header error: ";
-                    std::cerr << e.what() << '\n';
-                    continue;
                 }
-            }
-            sampleRate = freq;
+                sampleRate = freq;
 
-            // now process hex data
-            std::getline(input_file, data);
+                // now process hex data
+                std::getline(input_file, data);
 
-            // raw reading values
-            int hexPosition = 0;
-            int xRaw = 0;
-            int yRaw = 0;
-            int zRaw = 0;
-            double x = 0.0;
-            double y = 0.0;
-            double z = 0.0;
-            double t = 0.0;
+                // raw reading values
+                std::size_t hexPosition = 0;
+                int xRaw = 0;
+                int yRaw = 0;
+                int zRaw = 0;
+                double x = 0.0;
+                double y = 0.0;
+                double z = 0.0;
+                double t = 0.0;
 
-            int i = 0;
-            while (hexPosition < data.size() - 1) {
-                try {
-                    std::stringstream ss;
-                    xRaw = getSignedIntFromHex(data.substr(hexPosition, 3));
-                    yRaw = getSignedIntFromHex(data.substr(hexPosition + 3, 3));
-                    zRaw = getSignedIntFromHex(data.substr(hexPosition + 6, 3));
-                    // todo *** read in light[36:46] (10 bits to signed int) and
-                    // button[47] (bool) values...
+                int i = 0;
+                while (hexPosition < data.size() - 1) {
+                    try {
+                        std::stringstream ss;
+                        xRaw = getSignedIntFromHex(data.substr(hexPosition, 3));
+                        yRaw = getSignedIntFromHex(data.substr(hexPosition + 3, 3));
+                        zRaw = getSignedIntFromHex(data.substr(hexPosition + 6, 3));
+                        // todo *** read in light[36:46] (10 bits to signed int) and
+                        // button[47] (bool) values...
 
-                    // Update values to calibrated measure (taken from GENEActiv manual)
-                    x = (xRaw * 100. - mfrOffset[0]) / mfrGain[0];
-                    y = (yRaw * 100. - mfrOffset[1]) / mfrGain[1];
-                    z = (zRaw * 100. - mfrOffset[2]) / mfrGain[2];
+                        // Update values to calibrated measure (taken from GENEActiv manual)
+                        x = (xRaw * 100. - mfrOffset[0]) / mfrGain[0];
+                        y = (yRaw * 100. - mfrOffset[1]) / mfrGain[1];
+                        z = (zRaw * 100. - mfrOffset[2]) / mfrGain[2];
 
-                    t = (double)blockTime + (double)i * (1.0 / freq) * 1000;  // Unix millis
+                        t = (double)blockTime + (double)i * (1.0 / freq) * 1000;  // Unix millis
 
-                    time_array.push_back(t);
-                    x_array.push_back(x);
-                    y_array.push_back(y);
-                    z_array.push_back(z);
-                    T_array.push_back(temperature);
+                        time_array.push_back(t);
+                        x_array.push_back(x);
+                        y_array.push_back(y);
+                        z_array.push_back(z);
+                        T_array.push_back(temperature);
 
-                    hexPosition += 12;
-                    i++;
-                } catch (const std::exception &e) {
-                    errCounter++;
-                    std::cerr << "data error at i = " << i << ": ";
-                    std::cerr << e.what() << '\n';
-                    break;  // rest of this block could be corrupted
+                        hexPosition += 12;
+                        i++;
+                    } catch (const std::exception &e) {
+                        errCounter++;
+                        std::cerr << "data error at i = " << i << ": ";
+                        std::cerr << e.what() << '\n';
+                        break;  // rest of this block could be corrupted
+                    }
                 }
+            } else if (blockCount < start) {
+                // skip this block
+                for (int i = 1; i < blockHeaderSize; i++) {  // header
+                    input_file.ignore(max_streamsize, '\n');
+                }
+                input_file.ignore(max_streamsize, '\n');     // hexdata
+            } else {
+                // after end, no need to scan further
+                break;
             }
 
             // Progress bar
-            blockCount++;
             if (verbose) {
                 if ((blockCount % 10000 == 0) || (blockCount == numBlocksTotal)) {
-                    printf("Reading file... %d%%\r", (blockCount * 100 / numBlocksTotal));
+                    printf("Reading file... %lu%%\r", (blockCount * 100 / numBlocksTotal));
                 }
             }
 
         }
         statusOK = 1;
+        info["numBlocksTotal"] = numBlocksTotal;
     } catch (const std::exception &e) {
         std::cerr << "an error occurred while reading!\n" << e.what();
         statusOK = 0;
@@ -276,5 +299,7 @@ PYBIND11_MODULE(GENEActivReaderCPP, m) {
     m.def("add_arrays", &add_arrays, "Add two NumPy arrays");
     // N.B.: don't use 'read' as the C++ function name, it is already used by
     // some include and will not compile (so we use readFile):
-    m.def("read", &readFile, "Read a GENEActive file");
+    m.def("read", &readFile, "Read a GENEActive file",
+          // declaring arguments to be able to declare the default values for start and end
+          py::arg("accFile"), py::arg("verbose"), py::arg("start") = 0, py::arg("end") = 0);
 }
